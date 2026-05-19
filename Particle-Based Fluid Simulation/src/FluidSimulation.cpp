@@ -160,116 +160,6 @@ void FluidSimulation::UpdateSpatialOffsets() {
 void FluidSimulation::Step(float dt) {
     if (m_ComputeProgram == 0) return;
 
-    for (size_t i = 0; i < m_Blocks.size(); ++i) {
-        if (m_Blocks[i].isStatic == 0) {
-            m_Blocks[i].velocity.y += m_Settings.gravity * dt;
-            m_Blocks[i].position += m_Blocks[i].velocity * dt;
-            m_Blocks[i].angle += m_Blocks[i].angularVelocity * dt;
-
-            float cosAngle = std::abs(std::cos(m_Blocks[i].angle));
-            float sinAngle = std::abs(std::sin(m_Blocks[i].angle));
-
-            float extentX = cosAngle * m_Blocks[i].halfSize.x + sinAngle * m_Blocks[i].halfSize.y;
-            float extentY = sinAngle * m_Blocks[i].halfSize.x + cosAngle * m_Blocks[i].halfSize.y;
-
-            float halfBoundX = m_Settings.boundsSize.x / 2.0f;
-            float halfBoundY = m_Settings.boundsSize.y / 2.0f;
-
-            if (m_Blocks[i].position.y - extentY < -halfBoundY) {
-                m_Blocks[i].position.y = -halfBoundY + extentY;
-                m_Blocks[i].velocity.y *= -0.3f;
-                m_Blocks[i].velocity.x *= 0.95f;
-                m_Blocks[i].angularVelocity *= 0.95f;
-            }
-            else if (m_Blocks[i].position.y + extentY > halfBoundY) {
-                m_Blocks[i].position.y = halfBoundY - extentY;
-                m_Blocks[i].velocity.y *= -0.3f;
-            }
-
-            if (m_Blocks[i].position.x - extentX < -halfBoundX) {
-                m_Blocks[i].position.x = -halfBoundX + extentX;
-                m_Blocks[i].velocity.x *= -0.3f;
-                m_Blocks[i].velocity.y *= 0.95f;
-                m_Blocks[i].angularVelocity *= 0.95f;
-            }
-            else if (m_Blocks[i].position.x + extentX > halfBoundX) {
-                m_Blocks[i].position.x = halfBoundX - extentX;
-                m_Blocks[i].velocity.x *= -0.3f;
-                m_Blocks[i].velocity.y *= 0.95f;
-                m_Blocks[i].angularVelocity *= 0.95f;
-            }
-
-            for (size_t j = 0; j < m_Blocks.size(); ++j) {
-                if (i == j) continue;
-
-                if (m_Blocks[j].isStatic == 0 && j < i) continue;
-
-                PhysicalBlock& A = m_Blocks[i];
-                PhysicalBlock& B = m_Blocks[j];
-
-                glm::vec2 T = B.position - A.position;
-
-                float cA = std::cos(A.angle), sA = std::sin(A.angle);
-                glm::vec2 Ax(cA, sA), Ay(-sA, cA);
-
-                float cB = std::cos(B.angle), sB = std::sin(B.angle);
-                glm::vec2 Bx(cB, sB), By(-sB, cB);
-
-                glm::vec2 axes[4] = { Ax, Ay, Bx, By };
-                float minOverlap = 999999.0f;
-                glm::vec2 minAxis(0.0f);
-                bool isColliding = true;
-
-                for (int ax = 0; ax < 4; ++ax) {
-                    glm::vec2 axis = axes[ax];
-
-                    float rA = A.halfSize.x * std::abs(glm::dot(Ax, axis)) + A.halfSize.y * std::abs(glm::dot(Ay, axis));
-                    float rB = B.halfSize.x * std::abs(glm::dot(Bx, axis)) + B.halfSize.y * std::abs(glm::dot(By, axis));
-
-                    float dist = std::abs(glm::dot(T, axis));
-                    float overlap = rA + rB - dist;
-
-                    if (overlap <= 0.0f) {
-                        isColliding = false;
-                        break;
-                    }
-
-                    if (overlap < minOverlap) {
-                        minOverlap = overlap;
-                        minAxis = axis;
-                    }
-                }
-
-                if (isColliding) {
-                    if (glm::dot(T, minAxis) < 0.0f) {
-                        minAxis = -minAxis;
-                    }
-
-                    if (B.isStatic == 1) {
-                        A.position -= minAxis * minOverlap;
-
-                        float relativeVel = glm::dot(A.velocity, minAxis);
-                        if (relativeVel > 0.0f) {
-                            A.velocity -= minAxis * relativeVel * 1.3f;
-                        }
-                    }
-                    else {
-                        A.position -= minAxis * (minOverlap * 0.5f);
-                        B.position += minAxis * (minOverlap * 0.5f);
-
-                        glm::vec2 relVel = A.velocity - B.velocity;
-                        float velAlongNormal = glm::dot(relVel, minAxis);
-                        if (velAlongNormal > 0.0f) {
-                            float bounce = velAlongNormal * 0.65f;
-                            A.velocity -= minAxis * bounce;
-                            B.velocity += minAxis * bounce;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     glUseProgram(m_ComputeProgram);
 
     glUniform1ui(glGetUniformLocation(m_ComputeProgram, "numParticles"), m_NumParticles);
@@ -290,8 +180,6 @@ void FluidSimulation::Step(float dt) {
     glUniform1f(glGetUniformLocation(m_ComputeProgram, "SpikyPow3DerivativeScalingFactor"), 30.0f / (3.14159265f * pow(r, 5.0f)));
     glUniform1f(glGetUniformLocation(m_ComputeProgram, "SpikyPow2DerivativeScalingFactor"), 12.0f / (3.14159265f * pow(r, 4.0f)));
 
-    glUniform1i(glGetUniformLocation(m_ComputeProgram, "u_BlockCount"), static_cast<int>(m_Blocks.size()));
-
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_SSBO_Positions);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, m_SSBO_PredictedPositions);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, m_SSBO_Velocities);
@@ -303,16 +191,9 @@ void FluidSimulation::Step(float dt) {
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, m_SSBO_SortTarget_PredictedPositions);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, m_SSBO_SortTarget_Velocities);
 
-    GLuint blockSSBO = 0;
-    if (!m_Blocks.empty()) {
-        glGenBuffers(1, &blockSSBO);
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, blockSSBO);
-        glBufferData(GL_SHADER_STORAGE_BUFFER, m_Blocks.size() * sizeof(PhysicalBlock), m_Blocks.data(), GL_DYNAMIC_DRAW);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 10, blockSSBO);
-    }
-
     int numGroups = (m_NumParticles + 63) / 64;
     GLint indexLocation = glGetUniformLocation(m_ComputeProgram, "u_KernelIndex");
+
 
     glUniform2f(glGetUniformLocation(m_ComputeProgram, "u_InteractionPoint"), m_InteractionPoint.x, m_InteractionPoint.y);
     glUniform1f(glGetUniformLocation(m_ComputeProgram, "u_InteractionStrength"), m_InteractionStrength);
@@ -361,36 +242,6 @@ void FluidSimulation::Step(float dt) {
 
 
     glMemoryBarrier(GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT);
-
-    if (blockSSBO != 0) {
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, blockSSBO);
-        PhysicalBlock* gpuBlocks = (PhysicalBlock*)glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_READ_ONLY);
-
-        if (gpuBlocks) {
-            for (size_t i = 0; i < m_Blocks.size(); i++) {
-                if (m_Blocks[i].isStatic == 0) {
-                    float forceX = (float)gpuBlocks[i].forceX / 10000.0f;
-                    float forceY = (float)gpuBlocks[i].forceY / 10000.0f;
-                    float torque = (float)gpuBlocks[i].torqueAcc / 10000.0f;
-
-                    m_Blocks[i].velocity.x += (forceX / m_Blocks[i].mass) * 20.0f;
-                    m_Blocks[i].velocity.y += (forceY / m_Blocks[i].mass) * 20.0f;
-
-                    m_Blocks[i].angularVelocity += (torque / m_Blocks[i].momentOfInertia) * 20.0f;
-
-                    m_Blocks[i].velocity *= 0.99f;
-                    m_Blocks[i].angularVelocity *= 0.98f;
-                }
-
-                m_Blocks[i].forceX = 0;
-                m_Blocks[i].forceY = 0;
-                m_Blocks[i].torqueAcc = 0;
-            }
-            glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
-        }
-
-        glDeleteBuffers(1, &blockSSBO);
-    }
 
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }

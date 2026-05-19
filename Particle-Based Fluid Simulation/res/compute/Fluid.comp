@@ -1,35 +1,18 @@
 #version 430 core
 
-struct PhysicalBlock {
-    vec2 position;
-    vec2 halfSize;
-    vec2 velocity;
-    float angle;
-    float angularVelocity;
-    float mass;
-    float momentOfInertia;
-    int isStatic;
-    int forceX;
-    int forceY;
-    int torqueAcc;
-    vec2 padding;
-};
-
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-layout(std430, binding = 0)  buffer PositionsBuffer           { vec2 Positions[]; };
-layout(std430, binding = 1)  buffer PredictedPositionsBuffer  { vec2 PredictedPositions[]; };
-layout(std430, binding = 2)  buffer VelocitiesBuffer          { vec2 Velocities[]; };
-layout(std430, binding = 3)  buffer DensitiesBuffer           { vec2 Densities[]; }; 
-layout(std430, binding = 4)  buffer SpatialKeysBuffer         { uint SpatialKeys[]; };
-layout(std430, binding = 5)  buffer SpatialOffsetsBuffer      { uint SpatialOffsets[]; };
-layout(std430, binding = 6)  buffer SortedIndicesBuffer       { uint SortedIndices[]; };
-layout(std430, binding = 7)  buffer SortTargetPositions       { vec2 SortTarget_Positions[]; };
-layout(std430, binding = 8)  buffer SortTargetPredicted       { vec2 SortTarget_PredictedPositions[]; };
-layout(std430, binding = 9)  buffer SortTargetVelocities      { vec2 SortTarget_Velocities[]; };
-layout(std430, binding = 10) buffer BlockBuffer               { PhysicalBlock blocks[]; };
+layout(std430, binding = 0) buffer PositionsBuffer           { vec2 Positions[]; };
+layout(std430, binding = 1) buffer PredictedPositionsBuffer  { vec2 PredictedPositions[]; };
+layout(std430, binding = 2) buffer VelocitiesBuffer          { vec2 Velocities[]; };
+layout(std430, binding = 3) buffer DensitiesBuffer           { vec2 Densities[]; }; 
+layout(std430, binding = 4) buffer SpatialKeysBuffer         { uint SpatialKeys[]; };
+layout(std430, binding = 5) buffer SpatialOffsetsBuffer      { uint SpatialOffsets[]; };
+layout(std430, binding = 6) buffer SortedIndicesBuffer       { uint SortedIndices[]; };
+layout(std430, binding = 7) buffer SortTargetPositions       { vec2 SortTarget_Positions[]; };
+layout(std430, binding = 8) buffer SortTargetPredicted       { vec2 SortTarget_PredictedPositions[]; };
+layout(std430, binding = 9) buffer SortTargetVelocities      { vec2 SortTarget_Velocities[]; };
 
-uniform int u_BlockCount;
 uniform int u_KernelIndex;
 uniform uint numParticles;
 uniform float gravity;
@@ -260,58 +243,7 @@ void main() {
         Velocities[id] += viscosityForce * viscosityStrength * deltaTime;
     }
     else if (u_KernelIndex == 7) {
-        vec2 pos = Positions[id];
-        vec2 vel = Velocities[id];
-
-        pos += vel * deltaTime;
-
-        for (int b = 0; b < u_BlockCount; ++b) {
-            PhysicalBlock block = blocks[b];
-            
-            vec2 localPos = pos - block.position;
-            float cosA = cos(-block.angle);
-            float sinA = sin(-block.angle);
-            vec2 rotPos = vec2(localPos.x * cosA - localPos.y * sinA, localPos.x * sinA + localPos.y * cosA);
-
-            if (abs(rotPos.x) < block.halfSize.x && abs(rotPos.y) < block.halfSize.y) {
-                
-                float distLeft   = rotPos.x - (-block.halfSize.x);
-                float distRight  = block.halfSize.x - rotPos.x;
-                float distBottom = rotPos.y - (-block.halfSize.y);
-                float distTop    = block.halfSize.y - rotPos.y;
-
-                float minDist = min(min(distLeft, distRight), min(distBottom, distTop));
-                
-                vec2 localNormal = vec2(0.0);
-                if (minDist == distLeft)       { rotPos.x = -block.halfSize.x; localNormal = vec2(-1.0, 0.0); } 
-                else if (minDist == distRight) { rotPos.x =  block.halfSize.x; localNormal = vec2(1.0, 0.0); } 
-                else if (minDist == distBottom){ rotPos.y = -block.halfSize.y; localNormal = vec2(0.0, -1.0); } 
-                else if (minDist == distTop)   { rotPos.y =  block.halfSize.y; localNormal = vec2(0.0, 1.0); }
-
-                float cosB = cos(block.angle);
-                float sinB = sin(block.angle);
-                pos = vec2(rotPos.x * cosB - rotPos.y * sinB, rotPos.x * sinB + rotPos.y * cosB) + block.position;
-                vec2 worldNormal = vec2(localNormal.x * cosB - localNormal.y * sinB, localNormal.x * sinB + localNormal.y * cosB);
-
-                vec2 oldVel = vel;
-                vel = reflect(vel, worldNormal) * collisionDamping;
-
-                if (block.isStatic == 0) {
-                    vec2 impulse = oldVel - vel;
-                    
-                    atomicAdd(blocks[b].forceX, int(impulse.x * 10000.0));
-                    atomicAdd(blocks[b].forceY, int(impulse.y * 10000.0));
-                    
-                    vec2 radius = pos - block.position;
-                    float torque = (radius.x * impulse.y) - (radius.y * impulse.x);
-                    atomicAdd(blocks[b].torqueAcc, int(torque * 10000.0));
-                }
-            }
-        }
-
-        Positions[id] = pos;
-        Velocities[id] = vel;
-
+        Positions[id] += Velocities[id] * deltaTime;
         HandleCollisions(id);
     }
 }
