@@ -1,0 +1,249 @@
+#version 430 core
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 0) buffer PositionsBuffer           { vec2 Positions[]; };
+layout(std430, binding = 1) buffer PredictedPositionsBuffer  { vec2 PredictedPositions[]; };
+layout(std430, binding = 2) buffer VelocitiesBuffer          { vec2 Velocities[]; };
+layout(std430, binding = 3) buffer DensitiesBuffer           { vec2 Densities[]; }; 
+layout(std430, binding = 4) buffer SpatialKeysBuffer         { uint SpatialKeys[]; };
+layout(std430, binding = 5) buffer SpatialOffsetsBuffer      { uint SpatialOffsets[]; };
+layout(std430, binding = 6) buffer SortedIndicesBuffer       { uint SortedIndices[]; };
+layout(std430, binding = 7) buffer SortTargetPositions       { vec2 SortTarget_Positions[]; };
+layout(std430, binding = 8) buffer SortTargetPredicted       { vec2 SortTarget_PredictedPositions[]; };
+layout(std430, binding = 9) buffer SortTargetVelocities      { vec2 SortTarget_Velocities[]; };
+
+uniform int u_KernelIndex;
+uniform uint numParticles;
+uniform float gravity;
+uniform float deltaTime;
+uniform float collisionDamping;
+uniform float smoothingRadius;
+uniform float targetDensity;
+uniform float pressureMultiplier;
+uniform float nearPressureMultiplier;
+uniform float viscosityStrength;
+uniform vec2 boundsSize;
+
+uniform float Poly6ScalingFactor;
+uniform float SpikyPow3ScalingFactor;
+uniform float SpikyPow2ScalingFactor;
+uniform float SpikyPow3DerivativeScalingFactor;
+uniform float SpikyPow2DerivativeScalingFactor;
+
+uniform vec2 u_InteractionPoint;
+uniform float u_InteractionStrength;
+uniform float u_InteractionRadius;
+
+const ivec2 offsets2D[9] = ivec2[](
+    ivec2(-1, 1),  ivec2(0, 1),  ivec2(1, 1),
+    ivec2(-1, 0),  ivec2(0, 0),  ivec2(1, 0),
+    ivec2(-1, -1), ivec2(0, -1), ivec2(1, -1)
+);
+
+const uint hashK1 = 15823u;
+const uint hashK2 = 9737333u;
+
+ivec2 GetCell2D(vec2 position, float radius) { return ivec2(floor(position / radius)); }
+uint HashCell2D(ivec2 cell) { uvec2 ucell = uvec2(cell); return (ucell.x * hashK1 + ucell.y * hashK2); }
+uint KeyFromHash(uint hash, uint tableSize) { return hash % tableSize; }
+
+float SmoothingKernelPoly6(float dst, float radius) {
+    if (dst < radius) { float v = radius * radius - dst * dst; return v * v * v * Poly6ScalingFactor; }
+    return 0.0;
+}
+float SpikyKernelPow3(float dst, float radius) {
+    if (dst < radius) { float v = radius - dst; return v * v * v * SpikyPow3ScalingFactor; }
+    return 0.0;
+}
+float SpikyKernelPow2(float dst, float radius) {
+    if (dst < radius) { float v = radius - dst; return v * v * SpikyPow2ScalingFactor; }
+    return 0.0;
+}
+float DerivativeSpikyPow3(float dst, float radius) {
+    if (dst <= radius) { float v = radius - dst; return -v * v * SpikyPow3DerivativeScalingFactor; }
+    return 0.0;
+}
+float DerivativeSpikyPow2(float dst, float radius) {
+    if (dst <= radius) { float v = radius - dst; return -v * SpikyPow2DerivativeScalingFactor; }
+    return 0.0;
+}
+
+vec2 CalculateDensity(vec2 pos) {
+    ivec2 originCell = GetCell2D(pos, smoothingRadius);
+    float sqrRadius = smoothingRadius * smoothingRadius;
+    float density = 0.0;
+    float nearDensity = 0.0;
+
+    for (int i = 0; i < 9; i++) {
+        uint hash = HashCell2D(originCell + offsets2D[i]);
+        uint key = KeyFromHash(hash, numParticles);
+        uint currIndex = SpatialOffsets[key];
+
+        while (currIndex < numParticles) {
+            uint neighbourIndex = currIndex;
+            currIndex++;
+            uint neighbourKey = SpatialKeys[neighbourIndex];
+            if (neighbourKey != key) break; 
+
+            vec2 neighbourPos = PredictedPositions[neighbourIndex];
+            vec2 offsetToNeighbour = neighbourPos - pos;
+            float sqrDstToNeighbour = dot(offsetToNeighbour, offsetToNeighbour);
+
+            if (sqrDstToNeighbour > sqrRadius) continue;
+
+            float dst = sqrt(sqrDstToNeighbour);
+            density += SpikyKernelPow2(dst, smoothingRadius);
+            nearDensity += SpikyKernelPow3(dst, smoothingRadius);
+        }
+    }
+    return vec2(density, nearDensity);
+}
+
+void HandleCollisions(uint particleIndex) {
+    vec2 pos = Positions[particleIndex];
+    vec2 vel = Velocities[particleIndex];
+    vec2 halfSize = boundsSize * 0.5;
+    vec2 edgeDst = halfSize - abs(pos);
+
+    if (edgeDst.x <= 0.0) { pos.x = halfSize.x * sign(pos.x); vel.x *= -1.0 * collisionDamping; }
+    if (edgeDst.y <= 0.0) { pos.y = halfSize.y * sign(pos.y); vel.y *= -1.0 * collisionDamping; }
+
+    Positions[particleIndex] = pos;
+    Velocities[particleIndex] = vel;
+}
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= numParticles) return;
+
+    if (u_KernelIndex == 0) {
+        Velocities[id] += vec2(0.0, gravity) * deltaTime;
+        
+        if (u_InteractionStrength != 0.0) {
+            vec2 offset = u_InteractionPoint - Positions[id];
+            float sqrDst = dot(offset, offset);
+            if (sqrDst < u_InteractionRadius * u_InteractionRadius && sqrDst > 0.001) {
+                float dst = sqrt(sqrDst);
+                float centerInfluence = sqrt(1.0 - (dst / u_InteractionRadius)); 
+        
+                vec2 forceDirection = offset / dst;
+                Velocities[id] += forceDirection * centerInfluence * u_InteractionStrength * deltaTime;
+            }
+        }
+
+        const float predictionFactor = 1.0 / 120.0;
+        PredictedPositions[id] = Positions[id] + Velocities[id] * predictionFactor;
+    }
+    else if (u_KernelIndex == 1) {
+        ivec2 cell = GetCell2D(PredictedPositions[id], smoothingRadius);
+        uint hash = HashCell2D(cell);
+        SpatialKeys[id] = KeyFromHash(hash, numParticles);
+    }
+    else if (u_KernelIndex == 2) {
+        uint sortedIndex = SortedIndices[id];
+        SortTarget_Positions[id] = Positions[sortedIndex];
+        SortTarget_PredictedPositions[id] = PredictedPositions[sortedIndex];
+        SortTarget_Velocities[id] = Velocities[sortedIndex];
+    }
+    else if (u_KernelIndex == 3) {
+        Positions[id] = SortTarget_Positions[id];
+        PredictedPositions[id] = SortTarget_PredictedPositions[id];
+        Velocities[id] = SortTarget_Velocities[id];
+    }
+    else if (u_KernelIndex == 4) {
+        vec2 pos = PredictedPositions[id];
+        Densities[id] = CalculateDensity(pos);
+    }
+    else if (u_KernelIndex == 5) {
+        float density = Densities[id].x;
+        float densityNear = Densities[id].y;
+        
+        float pressure = (density - targetDensity) * pressureMultiplier;
+        float nearPressure = nearPressureMultiplier * densityNear;
+        vec2 pressureForce = vec2(0.0);
+        
+        vec2 pos = PredictedPositions[id];
+        ivec2 originCell = GetCell2D(pos, smoothingRadius);
+        float sqrRadius = smoothingRadius * smoothingRadius;
+
+        for (int i = 0; i < 9; i++) {
+            uint hash = HashCell2D(originCell + offsets2D[i]);
+            uint key = KeyFromHash(hash, numParticles);
+            uint currIndex = SpatialOffsets[key];
+
+            while (currIndex < numParticles) {
+                uint neighbourIndex = currIndex;
+                currIndex++;
+
+                if (neighbourIndex == id) continue;
+                if (SpatialKeys[neighbourIndex] != key) break;
+
+                vec2 neighbourPos = PredictedPositions[neighbourIndex];
+                vec2 offsetToNeighbour = neighbourPos - pos;
+                float sqrDstToNeighbour = dot(offsetToNeighbour, offsetToNeighbour);
+
+                if (sqrDstToNeighbour > sqrRadius) continue;
+
+                float dst = sqrt(sqrDstToNeighbour);
+                vec2 dirToNeighbour = dst > 0.0 ? offsetToNeighbour / dst : vec2(0.0, 1.0);
+
+                float neighbourDensity = Densities[neighbourIndex].x;
+                float neighbourNearDensity = Densities[neighbourIndex].y;
+                
+                if (neighbourDensity > 0.001 && neighbourNearDensity > 0.001) {
+                    float neighbourPressure = (neighbourDensity - targetDensity) * pressureMultiplier;
+                    float neighbourNearPressure = nearPressureMultiplier * neighbourNearDensity;
+
+                    float sharedPressure = (pressure + neighbourPressure) * 0.5;
+                    float sharedNearPressure = (nearPressure + neighbourNearPressure) * 0.5;
+
+                    pressureForce += dirToNeighbour * DerivativeSpikyPow2(dst, smoothingRadius) * sharedPressure / neighbourDensity;
+                    pressureForce += dirToNeighbour * DerivativeSpikyPow3(dst, smoothingRadius) * sharedNearPressure / neighbourNearDensity;
+                }
+            }
+        }
+
+        if (density > 0.001) {
+            vec2 acceleration = pressureForce / density;
+            Velocities[id] += acceleration * deltaTime;
+        }
+    }
+    else if (u_KernelIndex == 6) {
+        vec2 pos = PredictedPositions[id];
+        ivec2 originCell = GetCell2D(pos, smoothingRadius);
+        float sqrRadius = smoothingRadius * smoothingRadius;
+
+        vec2 viscosityForce = vec2(0.0);
+        vec2 velocity = Velocities[id];
+
+        for (int i = 0; i < 9; i++) {
+            uint hash = HashCell2D(originCell + offsets2D[i]);
+            uint key = KeyFromHash(hash, numParticles);
+            uint currIndex = SpatialOffsets[key];
+
+            while (currIndex < numParticles) {
+                uint neighbourIndex = currIndex;
+                currIndex++;
+
+                if (neighbourIndex == id) continue;
+                if (SpatialKeys[neighbourIndex] != key) break;
+
+                vec2 neighbourPos = PredictedPositions[neighbourIndex];
+                vec2 offsetToNeighbour = neighbourPos - pos;
+                float sqrDstToNeighbour = dot(offsetToNeighbour, offsetToNeighbour);
+
+                if (sqrDstToNeighbour > sqrRadius) continue;
+
+                float dst = sqrt(sqrDstToNeighbour);
+                vec2 neighbourVelocity = Velocities[neighbourIndex];
+                viscosityForce += (neighbourVelocity - velocity) * SmoothingKernelPoly6(dst, smoothingRadius);
+            }
+        }
+        Velocities[id] += viscosityForce * viscosityStrength * deltaTime;
+    }
+    else if (u_KernelIndex == 7) {
+        Positions[id] += Velocities[id] * deltaTime;
+        HandleCollisions(id);
+    }
+}

@@ -2,37 +2,36 @@
 #include <random>
 #include <vector>
 #include <cmath>
+#include <algorithm>
 
 void initializeGas(std::vector<Particle>& particles, int particleCount) {
-    std::random_device rd;
-    std::mt19937 gen(rd());
+    if (particleCount <= 0) return;
 
-    std::uniform_real_distribution<float> massDist(0.5f, 4.0f);
-    std::uniform_real_distribution<float> colorDist(0.4f, 1.0f);
+    const float mass = 1.0f;
+    const float gap = 0.1f;
+    const float radius = 0.15f;
+    const float aspect_ratio = 4.0f / 3.0f;
 
-    float baseMass = 1.0f;
-    float baseRadius = 0.08f;
+    int cols = static_cast<int>(std::round(std::sqrt(particleCount * (3.0f / 4.0f))));
+    cols = std::max(1, cols);
 
-    float maxSpeed = 2.0f;
-    std::uniform_real_distribution<float> velX(-maxSpeed, maxSpeed);
-    std::uniform_real_distribution<float> velY(-maxSpeed, maxSpeed);
+    float spacing = (2.0f * radius) + gap;
 
     for (int i = 0; i < particleCount; i++) {
         Particle p;
+        p.mass = mass;
+        p.radius = radius;
+        p.vel = glm::vec2(0.0f, 0.0f);
 
-        p.mass = massDist(gen);
-        p.radius = baseRadius * std::sqrt(p.mass / baseMass);
+        p.r = 1.0f;
+        p.g = 0.4f;
+        p.b = 0.1f;
 
-        std::uniform_real_distribution<float> posX(-4.0f + p.radius, 4.0f - p.radius);
-        std::uniform_real_distribution<float> posY(-3.0f + p.radius, 3.0f - p.radius);
+        int col = i % cols;
+        int row = i / cols;
 
-        p.pos = glm::vec2(posX(gen), posY(gen));
-        p.vel = glm::vec2(velX(gen), velY(gen));
-
-        float massFactor = (p.mass - 0.5f) / (4.0f - 0.5f);
-        p.r = 0.2f + 0.6f * massFactor;
-        p.g = colorDist(gen) * (1.0f - massFactor * 0.5f);
-        p.b = colorDist(gen);
+        p.pos.x = col * spacing;
+        p.pos.y = row * spacing;
 
         particles.push_back(p);
     }
