@@ -27,6 +27,8 @@ public:
     void SetUniform1f(const std::string& name, float value);
     void SetUniform1i(const std::string& name, int value);
 
+    unsigned int GetRendererID() const { return m_RendererID; }
+
 private:
     ShaderProgramSource ParseShader(const std::string& filepath);
     unsigned int CompileShader(unsigned int type, const std::string& source);
