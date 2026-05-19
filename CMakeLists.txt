@@ -16,40 +16,58 @@ set(SOURCE_FILES
 
 add_executable(${PROJECT_NAME} ${SOURCE_FILES})
 
-target_include_directories(${PROJECT_NAME} PRIVATE 
-    ${CMAKE_CURRENT_SOURCE_DIR}/Dependencies/GLFW/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/Dependencies/GLEW/glew-2.3.1/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/Dependencies/GLM
-)
+if(WIN32)
+    target_include_directories(${PROJECT_NAME} PRIVATE 
+        ${CMAKE_CURRENT_SOURCE_DIR}/Dependencies/GLFW/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/Dependencies/GLEW/glew-2.3.1/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/Dependencies/GLM
+    )
 
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-    set(ARCH_DIR "x64")
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(ARCH_DIR "x64")
+    else()
+        set(ARCH_DIR "Win32")
+    endif()
+
+    target_link_directories(${PROJECT_NAME} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Dependencies/GLFW/lib-vc2022
+        ${CMAKE_CURRENT_SOURCE_DIR}/Dependencies/GLEW/glew-2.3.1/lib/Release/${ARCH_DIR}
+    )
+    
+    target_link_libraries(${PROJECT_NAME} PRIVATE glew32 glfw3 opengl32)
+
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/Particle-Based Fluid Simulation/res"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/res"
+    )
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/Dependencies/GLEW/glew-2.3.1/bin/Release/${ARCH_DIR}/glew32.dll"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+    )
+
 else()
-    set(ARCH_DIR "Win32")
+    find_package(PkgConfig REQUIRED)
+    find_package(OpenGL REQUIRED)
+    
+    pkg_check_modules(GLFW REQUIRED glfw3)
+    pkg_check_modules(GLEW REQUIRED glew)
+
+    target_include_directories(${PROJECT_NAME} PRIVATE 
+        ${GLFW_INCLUDE_DIRS} 
+        ${GLEW_INCLUDE_DIRS}
+    )
+    
+    target_link_libraries(${PROJECT_NAME} PRIVATE 
+        ${GLFW_LIBRARIES} 
+        ${GLEW_LIBRARIES} 
+        OpenGL::GL
+    )
+
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/Particle-Based Fluid Simulation/res"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/res"
+    )
 endif()
-
-target_link_directories(${PROJECT_NAME} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/Dependencies/GLFW/lib-vc2022
-    ${CMAKE_CURRENT_SOURCE_DIR}/Dependencies/GLEW/glew-2.3.1/lib/Release/${ARCH_DIR}
-)
-
-target_link_libraries(${PROJECT_NAME} PRIVATE glew32 glfw3 opengl32)
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Particle-Based Fluid Simulation/res")
-    set(RES_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Particle-Based Fluid Simulation/res")
-else()
-    set(RES_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/res")
-endif()
-
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${RES_SRC_DIR}"
-    "$<TARGET_FILE_DIR:${PROJECT_NAME}>/res"
-    COMMENT "Copying assets simulator folder to the build target directory..."
-)
-
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "${CMAKE_CURRENT_SOURCE_DIR}/Dependencies/GLEW/glew-2.3.1/bin/Release/${ARCH_DIR}/glew32.dll"
-    "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-)
