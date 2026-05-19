@@ -10,14 +10,15 @@ A 2D fluid simulation engine built from scratch with C++ and OpenGL 4.3+, heavil
 - **Dynamic Color Grading:** A color palette (Blue -> Yellow -> Orange -> Red) computed completely on the GPU inside the vertex shader, dynamically blending particle colors based on real-time velocity lengths.
 
 ## Controls & Interaction
-| Input | Action |
+
+| Input | Mode |
 | :--- | :--- |
-| **Spacebar** | Toggle Update State |
-| **Left Click** | Attract Fluid Mass |
-| **Right Click** | Repel Fluid Mass |
+| **Spacebar** | Pause/Resume Simulation |
 | **Mouse Scroll** | Adjust Brush Size |
 | **F1** | Open Config Prompt |
-
+| **Key "1"** | **Switch to Force Field Mode**: <br>• *Left Click*: Attract Fluid Mass <br>• *Right Click*: Repel Fluid Mass |
+| **Key "2"** | **Switch to Anchor Geometry Mode**: <br>• *Left Click & Drag*: Deploy Static Anchor Block <br>• *Right Click*: Delete Block Under Cursor |
+| **Key "3"** | **Switch to Moveable Geometry Mode**: <br>• *Left Click & Drag*: Deploy Dynamic Rigid Body Block <br>• *Right Click*: Delete Block Under Cursor |
 ## Requirements
 
 - **C++17** Compiler or higher
@@ -42,4 +43,3 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 build\Release\FluidSimulation.exe
 ```
-
