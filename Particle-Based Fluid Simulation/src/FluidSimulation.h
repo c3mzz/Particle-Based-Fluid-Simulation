@@ -3,20 +3,21 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <algorithm>
 
 struct PhysicalBlock {
     glm::vec2 position;       
     glm::vec2 halfSize;       
     glm::vec2 velocity;       
-    float angle;              
+    float angle;
     float angularVelocity;    
-    float mass;               
+    float mass;
     float momentOfInertia;    
-    int isStatic;             
-    int forceX;               
-    int forceY;               
-    int torqueAcc;            
-    glm::vec2 padding;        
+    int isStatic;
+    int forceX;
+    int forceY;
+    int torqueAcc;
+    glm::vec2 padding;
 };
 
 class FluidSimulation {
@@ -31,6 +32,8 @@ public:
         float collisionDamping = 0.5f;
         glm::vec2 boundsSize = glm::vec2(26.66f, 15.0f);
         float createdBlockMass = 800.0f;
+        float blockFriction = 0.08f;
+        float particleToBlockImpulse = 15.0f;
     };
 
 private:
@@ -55,14 +58,24 @@ private:
     std::vector<GLuint> m_CpuOffsets;
     std::vector<GLuint> m_CpuIndices;
 
+    std::vector<unsigned int> m_KeyCounts;
+    std::vector<unsigned int> m_BucketOffsets;
+    std::vector<GLuint> m_SortedKeys;
+
     glm::vec2 m_InteractionPoint = glm::vec2(0.0f);
     float m_InteractionStrength = 0.0f;
     float m_InteractionRadius = 3.5f;
 
+    std::vector<PhysicalBlock> m_Blocks;
+    GLuint m_BlockSSBO = 0;
+
     bool CompileComputeShader(const std::string& shaderCode);
     void UpdateSpatialOffsets();
 
-    std::vector<PhysicalBlock> m_Blocks;
+    void UpdateBlocks(float dt);
+    void HandleBlockCollisions();
+    void DispatchComputeShaders(float dt);
+    void ReadbackBlockForces();
 
 public:
     FluidSimulation(int numParticles, const std::vector<glm::vec2>& initialPositions);
@@ -88,8 +101,8 @@ public:
         glm::vec2 minB = glm::vec2(std::min(p1.x, p2.x), std::min(p1.y, p2.y));
         glm::vec2 maxB = glm::vec2(std::max(p1.x, p2.x), std::max(p1.y, p2.y));
 
+        block.halfSize = glm::max((maxB - minB) * 0.5f, glm::vec2(0.1f)); 
         block.position = (minB + maxB) * 0.5f;
-        block.halfSize = (maxB - minB) * 0.5f;
         block.velocity = glm::vec2(0.0f);
         block.angle = 0.0f;
         block.angularVelocity = 0.0f;

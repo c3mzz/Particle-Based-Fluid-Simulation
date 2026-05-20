@@ -361,3 +361,13 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Gemini/Agent specific files
+gemini.md
+MEMORY.md
+.gemini/
+
+# CMake build directory
+build/
+bin/
+out/
